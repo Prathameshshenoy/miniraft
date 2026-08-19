@@ -16,7 +16,7 @@ const PORT = 8080;
 let currentLeader = null;
 let leaderInfo = null; // full status object for broadcasting to UI
 
-// ── FIX 1: Canvas replay ──────────────────────────────────────────────────────
+// ── Canvas replay ─────────────────────────────────────────────────────────────
 // Every committed stroke is appended here so new clients can catch up instantly.
 // Capped at 5000 entries to avoid unbounded memory growth in long sessions.
 const MAX_HISTORY = 5000;
@@ -29,7 +29,7 @@ function recordStroke(data) {
   }
 }
 
-// ── FIX 2: Stroke queue during elections ──────────────────────────────────────
+// ── Stroke queue during elections ────────────────────────────────────────────
 // Strokes that arrive while no leader is elected are held here and flushed
 // automatically once discoverLeader() finds a new leader.
 const strokeQueue = []; // [ { data, senderWs } ]
@@ -74,7 +74,7 @@ async function discoverLeader() {
     currentLeader = leader.replica;
     leaderInfo = leader;
 
-    // ── FIX 2: flush queued strokes now that we have a leader ─────────────────
+    // Flush any strokes that queued up while there was no leader
     if (leaderChanged && strokeQueue.length > 0) {
       flushQueue(); // intentionally not awaited — runs in background
     }
@@ -110,7 +110,7 @@ wss.on("connection", (ws) => {
   clients.add(ws);
   gw_log("CLIENT_CONNECTED", `total=${clients.size}`);
 
-  // ── FIX 1: Replay committed strokes to the new client ────────────────────
+  // Replay committed strokes to the new client
   // Send the full canvas history as a single batch so the new tab renders
   // the existing drawing before the user touches anything.
   if (committedStrokes.length > 0) {
@@ -140,7 +140,7 @@ async function forwardStroke(data, senderWs, retried = false) {
   if (!leader) leader = await discoverLeader();
 
   if (!leader) {
-    // ── FIX 2: Queue the stroke instead of dropping it ────────────────────
+    // Queue the stroke instead of dropping it
     if (strokeQueue.length < QUEUE_MAX) {
       strokeQueue.push({ data, senderWs });
       gw_log("STROKE_QUEUED", `queue_size=${strokeQueue.length}`);
@@ -185,7 +185,7 @@ async function forwardStroke(data, senderWs, retried = false) {
 
     const result = await res.json();
     if (result.committed) {
-      // ── FIX 1: Record every committed stroke in history ───────────────────
+      // Record every committed stroke in history
       if (!result.entry.data.__clear) recordStroke(result.entry.data);
 
       const payload = JSON.stringify({ type: "stroke", data: result.entry.data });
