@@ -4,73 +4,60 @@ networks:
   raft-net:
     driver: bridge
 
+x-replica-base: &replica-base
+  build: ./replica
+  restart: unless-stopped
+  networks:
+    - raft-net
+  volumes:
+    - ./replica:/app
+    - /app/node_modules
+
+x-replica-healthcheck: &replica-healthcheck
+  interval: 5s
+  timeout: 3s
+  retries: 5
+  start_period: 10s
+
 services:
   replica1:
-    build: ./replica1
+    <<: *replica-base
     container_name: replica1
-    restart: unless-stopped
     environment:
       - REPLICA_ID=replica1
       - PORT=4001
       - PEERS=http://replica2:4002,http://replica3:4003
-    volumes:
-      - ./replica1:/app
-      - /app/node_modules
-    networks:
-      - raft-net
     ports:
       - "4001:4001"
-    # ── FIX 3: Healthcheck ────────────────────────────────────────────────────
     healthcheck:
+      <<: *replica-healthcheck
       test: [ "CMD", "wget", "-q", "-O-", "http://localhost:4001/status" ]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
 
   replica2:
-    build: ./replica2
+    <<: *replica-base
     container_name: replica2
-    restart: unless-stopped
     environment:
       - REPLICA_ID=replica2
       - PORT=4002
       - PEERS=http://replica1:4001,http://replica3:4003
-    volumes:
-      - ./replica2:/app
-      - /app/node_modules
-    networks:
-      - raft-net
     ports:
       - "4002:4002"
     healthcheck:
+      <<: *replica-healthcheck
       test: [ "CMD", "wget", "-q", "-O-", "http://localhost:4002/status" ]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
 
   replica3:
-    build: ./replica3
+    <<: *replica-base
     container_name: replica3
-    restart: unless-stopped
     environment:
       - REPLICA_ID=replica3
       - PORT=4003
       - PEERS=http://replica1:4001,http://replica2:4002
-    volumes:
-      - ./replica3:/app
-      - /app/node_modules
-    networks:
-      - raft-net
     ports:
       - "4003:4003"
     healthcheck:
+      <<: *replica-healthcheck
       test: [ "CMD", "wget", "-q", "-O-", "http://localhost:4003/status" ]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
 
   gateway:
     build: ./gateway
@@ -85,7 +72,8 @@ services:
       - raft-net
     ports:
       - "8080:8080"
-    # ── FIX 3: Wait for replicas to be healthy, not just started ──────────────
+    # Wait for replicas to be healthy, not just started, so the gateway's
+    # first leader-discovery poll doesn't race container startup.
     depends_on:
       replica1:
         condition: service_healthy

@@ -1,5 +1,6 @@
 const express = require("express");
 const fetch = require("node-fetch");
+const { majorityNeeded, isLogUpToDate, shouldGrantVote, prevLogMatches, isDuplicateEntry } = require("./raft-logic");
 
 const app = express();
 app.use(express.json());
@@ -80,7 +81,7 @@ async function startElection() {
     if (r.voteGranted) votes++;
   }
 
-  const majority = Math.floor((PEERS.length + 1) / 2) + 1;
+  const majority = majorityNeeded(PEERS.length);
   raft_log("VOTES_RECEIVED", `votes=${votes} needed=${majority}`);
 
   if (state === "candidate" && votes >= majority) {
@@ -127,14 +128,8 @@ app.post("/request-vote", (req, res) => {
   const myLastIndex = log.length - 1;
   const myLastTerm = myLastIndex >= 0 ? log[myLastIndex].term : 0;
 
-  const logOk =
-    lastLogTerm > myLastTerm ||
-    (lastLogTerm === myLastTerm && lastLogIndex >= myLastIndex);
-
-  const voteGranted =
-    term >= currentTerm &&
-    logOk &&
-    (votedFor === null || votedFor === candidateId);
+  const logOk = isLogUpToDate(lastLogTerm, lastLogIndex, myLastTerm, myLastIndex);
+  const voteGranted = shouldGrantVote({ term, currentTerm, logUpToDate: logOk, votedFor, candidateId });
 
   if (voteGranted) {
     votedFor = candidateId;
@@ -187,17 +182,14 @@ app.post("/append-entries", (req, res) => {
   resetElectionTimer();
 
   // Consistency check — prevLogIndex must match
-  if (prevLogIndex >= 0) {
-    const prevEntry = log[prevLogIndex];
-    if (!prevEntry || prevEntry.term !== prevLogTerm) {
-      raft_log("LOG_MISMATCH", `prevIdx=${prevLogIndex} myLen=${log.length} — needs sync`);
-      // Return our log length so leader knows where to start the sync
-      return res.json({ success: false, logLength: log.length, term: currentTerm });
-    }
+  if (!prevLogMatches(log, prevLogIndex, prevLogTerm)) {
+    raft_log("LOG_MISMATCH", `prevIdx=${prevLogIndex} myLen=${log.length} — needs sync`);
+    // Return our log length so leader knows where to start the sync
+    return res.json({ success: false, logLength: log.length, term: currentTerm });
   }
 
   // Duplicate check
-  if (entry.index < log.length && log[entry.index] && log[entry.index].term === entry.term) {
+  if (isDuplicateEntry(log, entry)) {
     return res.json({ success: true, term: currentTerm });
   }
 
@@ -286,7 +278,7 @@ app.post("/replicate", async (req, res) => {
     }
   }
 
-  const majority = Math.floor((PEERS.length + 1) / 2) + 1;
+  const majority = majorityNeeded(PEERS.length);
 
   if (acks >= majority) {
     commitIndex = entry.index;
@@ -316,9 +308,3 @@ process.on("SIGTERM", () => {
   clearInterval(heartbeatTimer);
   process.exit(0);
 });
-// hot-reload test
-// hot-reload test
-// hot-reload test
-// hot-reload test
-// hot-reload test
-// hot-reload test
