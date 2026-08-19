@@ -9,23 +9,23 @@ Built with Node.js, WebSockets, Docker, and a simplified RAFT consensus protocol
 
 ```
 miniraft/
-├── docker-compose.yml        # Full cluster definition with healthchecks
+├── docker-compose.yml        # Cluster definition - one replica image, three instances
 ├── ARCHITECTURE.md           # Protocol design, API spec, failure scenarios
 ├── README.md                 # This file
-├── logs/
-│   └── failover-demo.log     # Captured log showing live failover events
 ├── gateway/                  # WebSocket server - leader discovery & client broadcast
 │   ├── Dockerfile
 │   ├── package.json
 │   └── server.js
-├── replica1/                 # RAFT replica node (same code, different env vars)
-│   ├── Dockerfile
+├── replica/                  # RAFT replica node - one image, started 3x with
+│   ├── Dockerfile            # different REPLICA_ID/PORT/PEERS env vars
 │   ├── package.json
-│   └── server.js
-├── replica2/                 # identical to replica1
-├── replica3/                 # identical to replica1
-└── frontend/
-    └── index.html            # Canvas UI served via nginx
+│   ├── server.js             # HTTP handlers, timers, replication
+│   ├── raft-logic.js         # Pure election/log decision functions (unit tested)
+│   └── raft-logic.test.js
+└── frontend/                  # Canvas UI served via nginx
+    ├── index.html
+    ├── style.css
+    └── app.js
 ```
 
 ---
@@ -100,16 +100,20 @@ docker start replica2
 It rejoins as a follower, catches up all missed entries via `/sync-log`, and
 participates normally. The sidebar shows it transition back to follower state.
 
-### 3. Hot-reload a replica (zero-downtime)
+### 3. Hot-reload (zero-downtime restart)
 
 ```bash
-# Touch any file inside a replica folder - nodemon detects the change,
-# sends SIGTERM, and restarts the process inside the running container
-echo " " >> replica1/server.js
+# All three replica containers mount the same ./replica folder, so editing
+# it restarts nodemon in all of them at once (no image rebuild needed).
+echo " " >> replica/server.js
 ```
 
-The container restarts in-place (no image rebuild needed). The restarted node
-catches up via the leader's `/sync-log` endpoint. Clients never disconnect.
+Each node restarts in place, starts a fresh election, and rebuilds its log via
+`/sync-log`. Clients never disconnect - the gateway just buffers strokes for the
+brief window while no leader is elected, then flushes them once one comes back up.
+
+To restart only one node instead, use `docker restart replica2` - the container
+process restarts but the other two never see a code change, so no election fires.
 
 ### 4. Stress / chaotic conditions
 
@@ -153,8 +157,6 @@ Key log events to watch for during a failover demo:
 | `CATCHUP_PUSH`   | Leader pushing missing entries to lagging follower |
 | `QUEUE_FLUSH`    | Gateway replaying strokes buffered during election |
 
-A sample log from a real failover run is in `logs/failover-demo.log`.
-
 ---
 
 ## Stopping
@@ -162,6 +164,19 @@ A sample log from a real failover run is in `logs/failover-demo.log`.
 ```bash
 docker compose down        # stop and remove containers
 docker compose down -v     # also remove volumes
+```
+
+---
+
+## Running the tests
+
+The election and log-consistency rules in `replica/raft-logic.js` are pure
+functions with a Jest unit test suite:
+
+```bash
+cd replica
+npm install
+npm test
 ```
 
 ---

@@ -269,7 +269,7 @@ Returns current node state. Polled by gateway every 200ms for leader discovery.
 
 ---
 
-## 6. Failure Scenarios List (Week 1 Deliverable)
+## 6. Failure Scenarios Tested
 
 | Scenario | Expected Behaviour |
 |---|---|
